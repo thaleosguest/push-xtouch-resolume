@@ -26,6 +26,45 @@ Désinstallation : *Paramètres Windows → Applications*. Les réglages sont ga
 
 Pour fabriquer l'installateur : `.venv\Scripts\python.exe packaging\build.py`, qui produit `dist\PushXTouchResolume_Setup_<version>.exe`.
 
+## Arena sur une autre machine (mode réseau)
+
+Les contrôleurs restent branchés en USB sur le PC de la passerelle. L'écran du Push 2 est en USB direct et doit
+rester local. La passerelle se connecte à Arena par le réseau : commandes **et** retour d'état passent par le
+WebSocket du webserver d'Arena (un seul port TCP, pas d'OSC).
+
+**Sur la machine d'Arena :**
+
+1. Arena > Preferences > **Webserver** : activer *Enable Webserver & REST API* et noter le port (8080 par défaut).
+2. Une adresse stable : IP fixe ou réservation DHCP sur le réseau local, ou l'adresse Tailscale (`100.x.y.z`).
+3. Pare-feu Windows, si la connexion est refusée (PowerShell **administrateur**, réseau en profil Privé) :
+
+```powershell
+New-NetFirewallRule -DisplayName "Resolume Webserver" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow -Profile Private
+```
+
+(Remplacer 8080 par le port réel. Il n'y a pas de règle OSC à ajouter : la passerelle n'utilise pas l'OSC.)
+
+**Sur le PC de la passerelle :** dans `config.yaml` (installé : `%APPDATA%\push-xtouch-resolume\config.yaml`) :
+
+```yaml
+arena:
+  host: 192.168.1.50          # IP de la machine d'Arena (locale ou Tailscale 100.x.y.z) ; 127.0.0.1 = ce PC
+  port: 8080                  # port du webserver d'Arena (« web_port » accepté aussi)
+  reconnect: {initial_delay_ms: 500, max_delay_ms: 10000}
+```
+
+Puis **Redémarrer** depuis l'icône. En console : `python -m pxr --host 192.168.1.50`.
+
+**Diagnostic :** `python -m pxr --check`, ou **Diagnostic Arena** dans le menu de l'icône. En moins de 5 s, il teste
+le nom d'hôte, le port du webserver, l'API REST et le WebSocket, et indique la piste à suivre si une étape échoue
+(pare-feu, webserver non activé, mauvais port…).
+
+**En direct :** si Arena redémarre ou si le lien coupe, l'écran du Push et les scribble strips de la X-Touch
+affichent **ARENA OFFLINE** (en rouge), les commandes sont ignorées et les faders restent en place. La passerelle
+retente seule, avec un délai qui double de 0,5 s à 10 s. Au retour, elle recharge l'état complet d'Arena et se
+réabonne à tout, sans rejouer les vieux mouvements. Les faders et encodeurs envoient au plus 60 valeurs par seconde
+et par paramètre (la dernière valeur arrive toujours) ; clips et boutons partent immédiatement.
+
 ## Installation pour le développement (Windows 10/11)
 
 ### 1. Python 3.12

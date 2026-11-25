@@ -34,13 +34,16 @@ class Rig:
         self.clock = 1000.0
         self.mcu.now = lambda: self.clock
         self.engine = Engine(self.state, self.arena, mapping or Mapping(), push=self.push, mcus=[McuUnit(self.mcu)])
+        self.engine.now = lambda: self.clock
         self.state.subscribe(lambda kind, pid: self.engine.on_structure() if kind == "structure" else None)
         self.arena.load()
 
     def feed(self, driver, msg):
-        """Message MIDI entrant -> événements -> moteur -> actions envoyées."""
+        """Message MIDI entrant -> événements -> moteur -> actions envoyées (horloge avancée de 0,1 s :
+        hors du créneau de limitation de débit, sauf dans les tests qui le testent)."""
         for ev in driver.parse(msg):
             self.engine.handle(ev)
+        self.clock += 0.1
         self.engine.flush_actions()
 
     def frame(self):

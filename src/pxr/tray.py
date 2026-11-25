@@ -154,7 +154,23 @@ def main() -> int:
         if gw.error:
             return "Erreur : voir le journal"
         s = gw.status
-        return f"Arena : connectée ({s.composition})" if s.arena else "Arena : injoignable"
+        where = f" ({s.arena_where})" if s.arena_where else ""
+        if s.arena:
+            return f"Arena{where} : connectée — {s.composition}"
+        return f"Arena{where} : OFFLINE" + (f" — {s.arena_error}" if s.arena_error else "")
+
+    def diagnose(icon, _item) -> None:
+        def work() -> None:
+            from .diag import check
+            try:
+                c = load_settings()[0]
+            except Exception as e:
+                message_box(f"Réglages invalides :\n{e}", error=True)
+                return
+            ok, report = check(c.arena.host, c.arena.port)
+            log.info("diagnostic :\n%s", report)
+            message_box(report, error=not ok)
+        threading.Thread(target=work, name="diagnostic", daemon=True).start()
 
     def line_push(_item) -> str:
         s = gw.status
@@ -195,6 +211,7 @@ def main() -> int:
         pystray.MenuItem(line_push, None, enabled=False),
         pystray.MenuItem(line_mcu, None, enabled=False),
         pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Diagnostic Arena", diagnose),
         pystray.MenuItem("Ouvrir le journal", open_log),
         pystray.MenuItem("Ouvrir les réglages", open_settings),
         pystray.MenuItem("Redémarrer (relit les réglages)", restart),

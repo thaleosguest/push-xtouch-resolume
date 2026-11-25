@@ -1,6 +1,6 @@
 [project]
 name = "push-xtouch-resolume"
-version = "0.0.1"
+version = "0.2.0"
 description = "Passerelle temps réel Resolume Arena <-> Ableton Push 2 / Behringer X-Touch"
 requires-python = ">=3.12"
 dependencies = [

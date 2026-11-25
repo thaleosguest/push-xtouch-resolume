@@ -158,8 +158,14 @@ class StateModel:
             del self._old
         self.loaded = True
         self.structure_version += 1
-        log.info("composition chargée name=%r layers=%d columns=%d decks=%d effects=%d params=%d",
-                 self.name, len(self.layers), len(self.columns), len(self.decks), len(self.effects), len(self.params))
+        # Arena renvoie souvent la composition entière sans changement de structure (travail à la souris) :
+        # on ne le signale au niveau INFO que si les ids des couches / colonnes / decks / effets ont changé.
+        sig = (self.name, tuple(x.id for x in self.layers), tuple(x.id for x in self.columns),
+               tuple(x.id for x in self.decks), tuple(x.id for x in self.effects))
+        level = logging.INFO if sig != getattr(self, "_sig", None) else logging.DEBUG
+        self._sig = sig
+        log.log(level, "composition chargée name=%r layers=%d columns=%d decks=%d effects=%d params=%d",
+                self.name, len(self.layers), len(self.columns), len(self.decks), len(self.effects), len(self.params))
         self._emit("structure")
 
     def _keep(self, d: Any) -> Param | None:

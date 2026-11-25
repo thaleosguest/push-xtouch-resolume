@@ -41,6 +41,8 @@ class DisplayModel:
     title: str = ""
     status: str = ""
     accent: tuple[int, int, int] = (255, 140, 0)
+    alert: str = ""            # message plein écran (ex. « ARENA OFFLINE ») : remplace tout le reste
+    alert_detail: str = ""
 
 
 def _font(size: int):
@@ -54,7 +56,7 @@ def _font(size: int):
 
 class Renderer:
     def __init__(self) -> None:
-        self.f_small, self.f_med, self.f_big = _font(15), _font(18), _font(24)
+        self.f_small, self.f_med, self.f_big, self.f_huge = _font(15), _font(18), _font(24), _font(60)
 
     def _fit(self, d: ImageDraw.ImageDraw, text: str, font, width: int) -> str:
         if d.textlength(text, font=font) <= width:
@@ -66,6 +68,15 @@ class Renderer:
     def render(self, m: DisplayModel) -> Image.Image:
         img = Image.new("RGB", (W, H), (0, 0, 0))
         d = ImageDraw.Draw(img)
+        if m.alert:
+            offline = "OFFLINE" in m.alert
+            d.rectangle([0, 0, W, H], fill=(120, 0, 0) if offline else (90, 60, 0))
+            tw = d.textlength(m.alert, font=self.f_huge)
+            d.text(((W - tw) / 2, 28), m.alert, font=self.f_huge, fill=(255, 255, 255))
+            detail = self._fit(d, m.alert_detail, self.f_med, W - 40)
+            dw = d.textlength(detail, font=self.f_med)
+            d.text(((W - dw) / 2, 112), detail, font=self.f_med, fill=(255, 210, 200))
+            return img
         for i in range(8):
             x = i * 120
             # boutons du haut

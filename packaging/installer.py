@@ -22,7 +22,7 @@ from pathlib import Path
 APP_ID = "push-xtouch-resolume"
 APP_NAME = "Push X-Touch Resolume"
 EXE = "PushXTouchResolume.exe"
-VERSION = "0.1.0"                     # = pxr.__version__ (build.py vérifie)
+VERSION = "0.2.0"                     # = pxr.__version__ (build.py vérifie)
 UNINSTALL_EXE = "uninstall.exe"
 REG_KEY = rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_ID}"
 NO_WINDOW = 0x08000000

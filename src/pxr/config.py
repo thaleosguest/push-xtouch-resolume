@@ -5,16 +5,26 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 RGB = tuple[int, int, int]
 
 
 # ─── config.yaml ────────────────────────────────────────────────────────────
 
+class ReconnectCfg(BaseModel):
+    initial_delay_ms: int = 500              # 1er essai après une coupure, puis le délai double à chaque essai
+    max_delay_ms: int = 10000
+
+
 class ArenaCfg(BaseModel):
-    host: str = "127.0.0.1"
-    port: int = 8080
+    host: str = "127.0.0.1"                  # IP ou nom de la machine d'Arena (réseau : son IP locale ou Tailscale)
+    port: int = Field(8080, validation_alias=AliasChoices("port", "web_port"))   # Preferences > Webserver
+    connect_timeout_s: float = 3.0           # ouverture de la connexion WebSocket
+    ping_interval_s: float = 2.0             # détection d'un lien mort (câble débranché, PC distant éteint)
+    ping_timeout_s: float = 3.0
+    command_rate_hz: float = 60.0            # débit max par paramètre (faders, encodeurs) ; déclenchements immédiats
+    reconnect: ReconnectCfg = ReconnectCfg()
 
 
 class PortCfg(BaseModel):

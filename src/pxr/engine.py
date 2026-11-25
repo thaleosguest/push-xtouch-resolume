@@ -1,12 +1,14 @@
 """Moteur de mapping : entrées des contrôleurs -> actions Arena, état Arena -> retours visuels.
 
 Arena reste la source de vérité : les retours ne montrent que l'état reçu d'Arena. Seules exceptions :
-les faders tenus (le driver MCU ne les bouge pas) et l'accumulation des crans d'encodeur entre deux trames
-(`pending`), envoyée à Arena une fois par trame.
+les faders tenus (le driver MCU ne les bouge pas) et l'accumulation des crans d'encodeur en attente d'envoi.
+Le moteur ne parle jamais au réseau : il passe par ArenaActions (ArenaClient, ou FakeArena en test / --dry-run).
+Arena hors ligne : les contrôleurs affichent « ARENA OFFLINE » et les commandes ne partent pas.
 """
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Protocol
 
 from .colors import RGB, rgb_to_xtouch, scale
@@ -33,13 +35,42 @@ class McuUnit:
         self.driver, self.strip_offset = driver, strip_offset
 
 
+class CommandThrottle:
+    """Valeurs continues (faders, encodeurs) : seule la dernière valeur de chaque paramètre est gardée, et un même
+    paramètre part au plus `rate_hz` fois par seconde. Une valeur retenue part dès que son créneau s'ouvre."""
+
+    def __init__(self, rate_hz: float = 60.0) -> None:
+        self.min_dt = 1.0 / rate_hz
+        self.pending: dict[int, Any] = {}
+        self.last_sent: dict[int, float] = {}
+
+    def put(self, pid: int, value: Any) -> None:
+        self.pending[pid] = value
+
+    def get(self, pid: int, default: Any) -> Any:
+        return self.pending.get(pid, default)
+
+    def due(self, now: float) -> list[tuple[int, Any]]:
+        out = []
+        for pid in list(self.pending):
+            if now - self.last_sent.get(pid, float("-inf")) >= self.min_dt:
+                out.append((pid, self.pending.pop(pid)))
+                self.last_sent[pid] = now
+        return out
+
+    def clear(self) -> None:
+        self.pending.clear()
+
+
 class Engine:
     def __init__(self, state: StateModel, arena: ArenaActions, mapping: Mapping,
-                 push: Push2Driver | None = None, display: Any = None, mcus: list[McuUnit] | None = None) -> None:
+                 push: Push2Driver | None = None, display: Any = None, mcus: list[McuUnit] | None = None,
+                 command_rate_hz: float = 60.0) -> None:
         self.state, self.arena, self.map = state, arena, mapping
         self.push, self.display = push, display
         self.mcus = {u.driver.source: u for u in (mcus or [])}
-        self.pending: dict[int, Any] = {}
+        self.throttle = CommandThrottle(command_rate_hz)
+        self.now = time.monotonic
         self.page = mapping.push2.default_page
         self.bank = 0            # 1ʳᵉ colonne affichée sur les pads (0-based)
         self.layer_off = 0       # 1ʳᵉ couche sur la rangée du bas
@@ -66,14 +97,14 @@ class Engine:
         return self.layer_color(layer)
 
     def _norm_of(self, p: Param) -> float:
-        v = self.pending.get(p.id, p.value)
+        v = self.throttle.get(p.id, p.value)
         if p.is_range:
             return min(1.0, max(0.0, (float(v) - p.min) / (p.max - p.min)))
         return 0.0
 
     def set_norm(self, p: Param | None, x: float) -> None:
         if p is not None and p.is_range:
-            self.pending[p.id] = p.denorm(x)
+            self.throttle.put(p.id, p.denorm(x))
 
     def nudge(self, p: Param | None, delta: float) -> None:
         if p is not None and p.is_range:
@@ -84,9 +115,16 @@ class Engine:
             self.arena.set_param(p.id, not bool(p.value))
 
     def flush_actions(self) -> None:
-        for pid, v in self.pending.items():
+        """Envoie les valeurs continues dont le créneau est ouvert (appelé ~à command_rate_hz)."""
+        if not self.online:
+            self.throttle.clear()        # pas de rejeu de vieux mouvements à la reconnexion
+            return
+        for pid, v in self.throttle.due(self.now()):
             self.arena.set_param(pid, v)
-        self.pending.clear()
+
+    @property
+    def online(self) -> bool:
+        return bool(getattr(self.arena, "connected", True)) and self.state.loaded
 
     def layer_at(self, i: int) -> Layer | None:
         return self.state.layers[i] if 0 <= i < len(self.state.layers) else None
@@ -119,7 +157,8 @@ class Engine:
 
     # ─── entrées ─────────────────────────────────────────────────────────
     def handle(self, ev: ControlEvent) -> None:
-        if not self.state.loaded:
+        if not self.online:
+            self.held_pads.clear()
             return
         if ev.source == "push2":
             self._push_event(ev)
@@ -263,18 +302,50 @@ class Engine:
             self._tap()
 
     # ─── rendu ───────────────────────────────────────────────────────────
+    def offline_text(self) -> tuple[str, str]:
+        """(titre, détail) affichés quand Arena n'est pas joignable."""
+        a = self.arena
+        where = f"{getattr(a, 'host', '?')}:{getattr(a, 'port', '?')}"
+        conn = getattr(a, "conn_state", None)
+        if conn is not None and conn.name == "CONNECTING":
+            title = "CONNEXION À ARENA…"
+        else:
+            title = "ARENA OFFLINE"
+        err = getattr(a, "last_error", None)
+        return title, f"{where}" + (f" — {err}" if err else "") + " — reconnexion automatique"
+
     def render(self) -> None:
         if self.push is not None:
             self._render_push()
         if self.display is not None:
             self.display.model = self._display_model()
         for unit in self.mcus.values():
-            self._render_mcu(unit)
+            if self.online:
+                self._render_mcu(unit)
+            else:
+                self._render_mcu_offline(unit)
+
+    def _render_mcu_offline(self, unit: McuUnit) -> None:
+        """LCD : message sur les 8 tranches, en rouge ; LED et couronnes éteintes ; moteurs laissés en place."""
+        d = unit.driver
+        title, detail = self.offline_text()
+        top = ("ARENA OFFLINE" if title == "ARENA OFFLINE" else "CONNEXION ARENA...").center(56)
+        bottom = detail.split(" — ")[0].center(56)
+        for i in range(8):
+            d.set_strip(i, top[7 * i:7 * i + 7], bottom[7 * i:7 * i + 7], 1)
+            d.set_ring(i, None)
+            d.set_fader(i, None)
+            for prefix in ("select", "solo", "mute", "rec"):
+                d.set_led(f"{prefix}{i + 1}", False)
+        d.set_fader(8, None)
+        for name in (self.map.mcu.play_button, self.map.mcu.stop_button, self.map.mcu.tap_button):
+            if name:
+                d.set_led(name, False)
 
     def _render_push(self) -> None:
         p, m, c, s = self.push, self.map.push2, self.map.colors, self.state
         p.clear()
-        if not s.loaded:
+        if not self.online:
             return
         dim = c.dim_factor
         anim = m.playing_animation
@@ -340,8 +411,8 @@ class Engine:
         s, m = self.state, self.map.push2
         dm = DisplayModel()
         connected = getattr(self.arena, "connected", False)
-        if not s.loaded:
-            dm.title, dm.status = "push-xtouch-resolume", "Arena : en attente…"
+        if not self.online:
+            dm.alert, dm.alert_detail = self.offline_text()
             return dm
         deck = s.selected_deck()
         ncol = len(s.columns)

@@ -31,6 +31,8 @@ class Status:
     push_display: bool | None = None
     mcu: dict[str, bool] = field(default_factory=dict)
     running: bool = False
+    arena_where: str = ""
+    arena_error: str = ""
 
 
 async def run(cfg: Config, mapping: Mapping, dry_run: bool = False,
@@ -38,7 +40,7 @@ async def run(cfg: Config, mapping: Mapping, dry_run: bool = False,
     loop = asyncio.get_running_loop()
     status = status if status is not None else Status()
     state = StateModel()
-    arena = FakeArena(state) if dry_run else ArenaClient(state, cfg.arena.host, cfg.arena.port)
+    arena = FakeArena(state) if dry_run else ArenaClient.from_cfg(state, cfg.arena)
     engine: Engine | None = None
 
     def emit(ev) -> None:
@@ -69,17 +71,22 @@ async def run(cfg: Config, mapping: Mapping, dry_run: bool = False,
         ports.append((port, drv))
         units.append(McuUnit(drv, mc.strip_offset))
 
-    engine = Engine(state, arena, mapping, push=push, display=display, mcus=units)
+    engine = Engine(state, arena, mapping, push=push, display=display, mcus=units,
+                    command_rate_hz=cfg.arena.command_rate_hz)
     state.subscribe(lambda kind, pid: engine.on_structure() if kind == "structure" else None)
 
     arena_task = asyncio.create_task(arena.run(), name="arena")
-    period = 1.0 / cfg.refresh_hz
-    next_poll = 0.0
-    log.info("démarrage dry_run=%s refresh_hz=%s controleurs=%s", dry_run, cfg.refresh_hz,
-             [p.label for p, _ in ports])
+    # Boucle cadencée au débit des commandes (60 Hz) ; le rendu des LED / moteurs suit refresh_hz.
+    tick = 1.0 / max(cfg.arena.command_rate_hz, cfg.refresh_hz)
+    render_every = 1.0 / cfg.refresh_hz
+    next_poll = next_render = 0.0
+    where = "simulée (--dry-run)" if dry_run else f"{cfg.arena.host}:{cfg.arena.port}"
+    log.info("démarrage arena=%s refresh_hz=%s command_rate_hz=%s controleurs=%s", where, cfg.refresh_hz,
+             cfg.arena.command_rate_hz, [p.label for p, _ in ports])
     status.running = True
     status.push_midi = False if push is not None else None
     status.push_display = False if display is not None else None
+    status.arena_where = where
     try:
         while stop is None or not stop.is_set():
             now = loop.time()
@@ -88,6 +95,10 @@ async def run(cfg: Config, mapping: Mapping, dry_run: bool = False,
                     port.poll()
                 next_poll = now + cfg.port_poll_s
             engine.flush_actions()
+            if now < next_render:
+                await asyncio.sleep(tick)
+                continue
+            next_render = now + render_every
             engine.render()
             if push is not None and state.tempo is not None:
                 push.clock.bpm = float(state.tempo.value)
@@ -95,6 +106,7 @@ async def run(cfg: Config, mapping: Mapping, dry_run: bool = False,
                 if port.is_open:
                     drv.flush()
             status.arena = bool(arena.connected)
+            status.arena_error = getattr(arena, "last_error", None) or ""
             status.composition = state.name if state.loaded else ""
             for port, drv in ports:
                 if drv is push:
@@ -105,7 +117,7 @@ async def run(cfg: Config, mapping: Mapping, dry_run: bool = False,
                 status.push_display = display.connected
             if arena_task.done() and arena_task.exception():
                 raise arena_task.exception()
-            await asyncio.sleep(period)
+            await asyncio.sleep(tick)
     finally:
         status.running = False
         log.info("arrêt : extinction des contrôleurs")
@@ -129,9 +141,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", default="config.yaml")
     ap.add_argument("--mapping", default="mapping.yaml")
     ap.add_argument("--dry-run", action="store_true", help="sans Arena : composition de démo simulée")
+    ap.add_argument("--host", help="machine d'Arena (remplace arena.host de config.yaml)")
+    ap.add_argument("--port", type=int, help="port du webserver d'Arena (remplace arena.port)")
+    ap.add_argument("--check", action="store_true", help="diagnostic de l'accès à Arena, puis quitte")
     ap.add_argument("--log-level", default=None)
     a = ap.parse_args(argv)
     cfg = load_config(a.config if Path(a.config).exists() else None)
+    if a.host:
+        cfg.arena.host = a.host
+    if a.port:
+        cfg.arena.port = a.port
+    if a.check:
+        from .diag import check
+        ok, report = check(cfg.arena.host, cfg.arena.port)
+        print(report)
+        return 0 if ok else 2
     mapping = load_mapping(a.mapping if Path(a.mapping).exists() else None)
     logging.basicConfig(level=(a.log_level or cfg.log_level).upper(),
                         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s", stream=sys.stdout)

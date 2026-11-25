@@ -1,0 +1,29 @@
+# Matériel et réseau. Les ports MIDI sont choisis par motif regex (le numéro final change selon le PC).
+
+arena:
+  host: 127.0.0.1
+  port: 8080
+
+push2:
+  enabled: true
+  midi:                       # port « Live » du Push. Arena > Preferences > MIDI : Ableton Push 2 DÉCOCHÉ
+    input: '^Ableton Push 2 \d+$'
+    output: '^Ableton Push 2 \d+$'
+  display: true
+  display_fps: 20
+
+mcu:
+  - name: xtouch
+    enabled: true
+    transport: usb            # usb | rtp (en RTP-MIDI, changer les motifs ci-dessous pour le port réseau)
+    midi:
+      input: '^X-Touch \d+$'
+      output: '^X-Touch \d+$'
+    sysex_id: 0x14
+    has_master: true
+    strip_offset: 0
+  # Extender (hors v1) : 2e instance, sysex_id 0x15, has_master: false, strip_offset: 8
+
+refresh_hz: 40                # trames LED / moteurs par seconde
+port_poll_s: 2.0              # recherche des contrôleurs débranchés
+log_level: INFO

@@ -1,0 +1,16 @@
+# Environnement et caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Compilation (packaging/build.py) : l'installateur est publié dans les releases GitHub
+build/
+dist/
+
+# Résultats des spikes (dumps de la composition et journaux de la machine de test)
+spikes/out/
+
+# Référence REST de Resolume : document Resolume, servi par Arena sur /api/docs/rest/swagger.yaml
+docs/arena/

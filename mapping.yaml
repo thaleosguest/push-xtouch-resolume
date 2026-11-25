@@ -1,0 +1,60 @@
+# Assignations. Noms des boutons : voir src/pxr/drivers/push2.py (BUTTON_CC) et src/pxr/drivers/mcu.py (NOTE_NAMES).
+# Chemins de paramètres de couche : chemin dans l'objet couche de l'API Arena (ex. video.opacity, master,
+# transition.duration, audio.volume, bypassed, solo).
+
+push2:
+  max_layer_rows: 7           # rangées de pads = couches 1..N, du bas vers le haut
+  column_row: true            # rangée au-dessus des couches = déclenchement des colonnes
+  bank_prev: left             # banque de colonnes (8 par 8)
+  bank_next: right
+  layers_up: up               # fait défiler les couches si plus de 7
+  layers_down: down
+  deck_buttons: [scene1, scene2, scene3, scene4, scene5, scene6, scene7, scene8]   # scene1 = en haut
+  page_buttons: {layers: mix, fx: device}
+  default_page: layers
+  layer_param: video.opacity  # page Couches : encodeur n = ce paramètre de la couche n
+  master_slot: null           # encodeur (0-7) doublant le master composition ; null = l'encodeur master du Push suffit
+  fx_prev: page_left          # page FX : effets 1-8 / 9-16 sur les boutons du haut
+  fx_next: page_right
+  encoder_step: 0.004
+  play_button: play           # lecture / pause du tempo
+  tap_button: tap_tempo
+  playing_animation: pulse    # none | pulse | blink, au BPM d'Arena
+  touchstrip_crossfader: false
+
+mcu:
+  fader_param: video.opacity
+  encoder_param: transition.duration
+  encoder_step: 0.01
+  select_button: true         # Select = sélection de la couche dans Arena
+  solo_param: solo
+  mute_param: bypassed
+  bank_prev: bank_left
+  bank_next: bank_right
+  channel_prev: channel_left
+  channel_next: channel_right
+  play_button: play
+  stop_button: stop
+  tap_button: cycle
+
+colors:
+  # colorid Arena -> couleur des LED (Push) et des écrans (X-Touch, teinte la plus proche parmi 7).
+  # Les couleurs d'Arena sont ternes et se distinguent surtout par la clarté (invisible sur des LED) :
+  # on choisit une teinte franche par colorid. "1" (gris) = pas de couleur -> couleur de la couche, puis repli.
+  colorid_led:
+    "2": [255, 40, 60]        # Arena : brun rosé
+    "3": [60, 255, 190]       # Arena : vert menthe
+    "4": [0, 200, 30]         # Arena : vert d'eau foncé
+    "5": [30, 70, 255]        # Arena : bleu ardoise
+    "6": [190, 40, 255]       # Arena : mauve
+  layer_fallback:             # couleur des clips sans colorid, par couche (couche 1, 2, 3…)
+    - [255, 70, 0]            # orange (rouge sur la X-Touch, qui n'a que 7 couleurs)
+    - [0, 190, 255]           # bleu ciel
+    - [255, 220, 0]           # jaune
+    - [255, 80, 170]          # rose
+    - [170, 255, 0]           # vert anis
+    - [255, 255, 255]         # blanc
+    - [255, 170, 110]         # pêche
+  dim_factor: 0.157           # clip chargé = 16 % de la puissance (niveau 40/255 choisi au spike 6)
+  column_active: [255, 255, 255]
+  deck_active: [0, 200, 255]
